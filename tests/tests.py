@@ -1,5 +1,6 @@
 import json
 import os.path
+import warnings
 from email.mime.image import MIMEImage
 
 from django.core import mail
@@ -11,6 +12,7 @@ from django.test.utils import override_settings
 
 import celery
 from djcelery_email import tasks, utils
+from djcelery_email.backends import CeleryEmailBackend
 
 
 def even(n):
@@ -197,6 +199,23 @@ class TaskTests(TestCase):
         tasks.send_email(utils.email_to_dict(msg), foo='bar')
         self.assertEqual(TracingBackend.kwargs.get('foo'), 'bar')
 
+    @override_settings(
+        CELERY_EMAIL_BACKEND='tests.tests.TracingBackend',
+        MAILERS={'default': {'BACKEND': 'django.core.mail.backends.locmem.EmailBackend'}},
+    )
+    def test_send_emails_with_mailers_configured(self):
+        """
+        Regression test: the task used to build its connection via
+        django.core.mail.get_connection(backend=..., **kwargs), which raises
+        RuntimeError on Django 6.1+ as soon as the project also defines
+        MAILERS, since get_connection() no longer accepts an explicit
+        'backend' argument in that case.
+        """
+        TracingBackend.called = False
+        msg = mail.EmailMessage()
+        tasks.send_email(utils.email_to_dict(msg), backend_kwargs={})
+        self.assertTrue(TracingBackend.called)
+
 
 class EvenErrorBackend(locmem.EmailBackend):
     """ Fails to deliver every 2nd message. """
@@ -294,6 +313,17 @@ class BackendTests(TestCase):
         self.assertEqual(messages[0]['subject'], 'test1')
         self.assertEqual(messages[1]['subject'], 'test2')
         self.assertEqual(backend_kwargs, {'username': 'user', 'password': 'pass'})
+
+    def test_fail_silently_stored_without_deprecation_warning(self):
+        """
+        fail_silently must be tracked as our own attribute rather than passed
+        to BaseEmailBackend.__init__(), which Django 6.1 deprecates support
+        for (and may error on in a future release).
+        """
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            backend = CeleryEmailBackend(fail_silently=True)
+        self.assertTrue(backend.fail_silently)
 
     def test_chunking(self):
         """

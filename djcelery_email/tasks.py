@@ -1,5 +1,6 @@
 from django.conf import settings
-from django.core.mail import EmailMessage, get_connection
+from django.core.mail import EmailMessage
+from django.utils.module_loading import import_string
 
 from celery import shared_task
 
@@ -16,7 +17,6 @@ TASK_CONFIG.update(settings.CELERY_EMAIL_TASK_CONFIG)
 
 # import base if string to allow a base celery task
 if 'base' in TASK_CONFIG and isinstance(TASK_CONFIG['base'], str):
-    from django.utils.module_loading import import_string
     TASK_CONFIG['base'] = import_string(TASK_CONFIG['base'])
 
 
@@ -35,7 +35,13 @@ def send_emails(messages, backend_kwargs=None, **kwargs):
     # make sure they're all dicts
     messages = [email_to_dict(m) for m in messages]
 
-    conn = get_connection(backend=settings.CELERY_EMAIL_BACKEND, **combined_kwargs)
+    # Construct the real backend directly instead of going through
+    # django.core.mail.get_connection(), which Django 6.1 deprecates and which
+    # raises RuntimeError outright when the project also defines MAILERS,
+    # since it no longer accepts an explicit `backend` argument in that case.
+    # https://docs.djangoproject.com/en/6.1/releases/6.1/#deprecated-features-6-1
+    backend_class = import_string(settings.CELERY_EMAIL_BACKEND)
+    conn = backend_class(**combined_kwargs)
     try:
         conn.open()
     except Exception:

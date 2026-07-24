@@ -7,7 +7,11 @@ from djcelery_email.utils import chunked, email_to_dict
 
 class CeleryEmailBackend(BaseEmailBackend):
     def __init__(self, fail_silently=False, **kwargs):
-        super(CeleryEmailBackend, self).__init__(fail_silently)
+        # Django 6.1 deprecates BaseEmailBackend support for fail_silently; track
+        # it as our own attribute instead of forwarding it to the base class.
+        # https://docs.djangoproject.com/en/6.1/releases/6.1/#deprecated-features-6-1
+        super(CeleryEmailBackend, self).__init__()
+        self.fail_silently = fail_silently
         self.init_kwargs = kwargs
 
     def send_messages(self, email_messages):
